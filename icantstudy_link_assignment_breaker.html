@@ -8,6 +8,8 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/mammoth@1.6.0/mammoth.browser.min.js"></script>
   <script>
     tailwind.config = {
       theme: {
@@ -127,10 +129,10 @@
         <!-- Drag & Drop Zone -->
         <div>
           <label class="block text-xs font-mono uppercase tracking-wider text-gray-500 mb-2">
-            1. Upload Reference Files (PDF, DOCX, TXT, MD, Images)
+            1. Upload Reference Files (PDF, DOCX, TXT, MD)
           </label>
           <div id="drop-zone" class="border border-dashed border-gray-300 hover:border-indigo-500 bg-[#FAFAFA] hover:bg-indigo-50/30 rounded-lg p-5 text-center transition cursor-pointer">
-            <input type="file" id="file-input" class="hidden" multiple accept=".txt,.md,.pdf,.doc,.docx,.csv,.json,.png,.jpg,.jpeg,.webp" />
+            <input type="file" id="file-input" class="hidden" multiple accept=".txt,.md,.pdf,.docx,.csv,.json" />
             <div class="flex flex-col items-center justify-center gap-1.5">
               <svg class="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" stroke-width="1.75" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M12 16V4m0 0l-4 4m4-4l4 4M4 20h16" />
@@ -556,6 +558,9 @@ Requirements:
     // INITIALIZATION
     // =========================================================================
     window.addEventListener('DOMContentLoaded', () => {
+      if (window.pdfjsLib) {
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
+      }
       initDefaultDeadline();
       setupFileHandlers();
       setupInputListeners();
@@ -656,38 +661,57 @@ Requirements:
       });
     }
 
-    async function handleFiles(fileList) {
-      for (const file of Array.from(fileList)) {
-        const ext = file.name.split('.').pop().toLowerCase();
-        let extracted = '';
+    const MAX_FILE_MB = 10;
 
-        try {
-          if (['txt', 'md', 'csv', 'json'].includes(ext) || file.type.startsWith('text/')) {
-            extracted = await file.text();
-          } else {
-            // For binary files (PDF/DOCX/Images), extract readable ASCII strings if present + metadata cue
-            const buffer = await file.arrayBuffer();
-            const decoder = new TextDecoder('utf-8', { fatal: false });
-            const rawStr = decoder.decode(buffer);
-            // Pull readable English words/sentences if uncompressed text exists
-            const cleanChunks = rawStr.match(/[A-Za-z0-9 ,.;:()\-_/]{18,}/g);
-            const sampleText = cleanChunks ? cleanChunks.slice(0, 25).join(' ') : '';
-            extracted = `[Uploaded File: ${file.name} (${Math.round(file.size / 1024)} KB)] ${sampleText}`;
-          }
-        } catch (err) {
-          extracted = `[Uploaded File: ${file.name}]`;
+    async function extractFileText(file) {
+      const ext = file.name.split('.').pop().toLowerCase();
+      if (['txt', 'md', 'csv', 'json'].includes(ext) || file.type.startsWith('text/')) {
+        return await file.text();
+      }
+      const buffer = await file.arrayBuffer();
+      if (ext === 'pdf') {
+        if (!window.pdfjsLib) throw new Error('PDF parser failed to load (check network)');
+        const doc = await pdfjsLib.getDocument({ data: buffer }).promise;
+        // shortcut: capped at 50 pages; raise if users hit this on full syllabi
+        const pages = Math.min(doc.numPages, 50);
+        const chunks = [];
+        for (let i = 1; i <= pages; i++) {
+          const content = await (await doc.getPage(i)).getTextContent();
+          chunks.push(content.items.map(it => it.str).join(' '));
         }
+        return chunks.join('\n');
+      }
+      if (ext === 'docx') {
+        if (!window.mammoth) throw new Error('DOCX parser failed to load (check network)');
+        const result = await mammoth.extractRawText({ arrayBuffer: buffer });
+        return result.value;
+      }
+      throw new Error(`.${ext} not supported (use PDF, DOCX, TXT, MD, CSV, JSON)`);
+    }
 
-        state.files.push({
-          name: file.name,
-          size: file.size,
-          textContent: extracted
-        });
+    async function handleFiles(fileList) {
+      let accepted = 0;
+      for (const file of Array.from(fileList)) {
+        if (file.size > MAX_FILE_MB * 1024 * 1024) {
+          showToast(`Skipped ${file.name}: over ${MAX_FILE_MB} MB.`);
+          continue;
+        }
+        try {
+          const extracted = await extractFileText(file);
+          if (!extracted.trim()) {
+            showToast(`${file.name}: no extractable text (scanned PDF? paste the text instead).`);
+            continue;
+          }
+          state.files.push({ name: file.name, size: file.size, textContent: extracted });
+          accepted++;
+        } catch (err) {
+          showToast(`Couldn't read ${file.name}: ${err.message}`);
+        }
       }
 
       renderFileList();
       updateWordCounter();
-      showToast(`Attached ${fileList.length} file(s) for analysis.`);
+      if (accepted > 0) showToast(`Attached ${accepted} file(s) for analysis.`);
     }
 
     function removeFile(index) {

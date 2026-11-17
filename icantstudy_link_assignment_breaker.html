@@ -203,7 +203,7 @@
           Before we calculate: be honest about where you're starting.
         </h2>
         <p class="text-sm text-gray-600 mt-1">
-          Standard syllabi lie about hours because they assume you already know the material. We adjust our model using real student forum pacing data.
+          Standard syllabi lie about hours because they assume you already know the material. We adjust our built-in baseline estimates with your calibration — and get more accurate as students log their real hours below.
         </p>
       </div>
 
@@ -393,13 +393,21 @@
         </div>
       </div>
 
-      <!-- Student Forum Benchmark Banner -->
-      <div class="bg-white border border-[#E5E7EB] rounded-xl p-4 flex items-start gap-3">
-        <div class="px-2 py-1 rounded bg-amber-50 border border-amber-200 text-amber-800 font-mono text-[11px] font-semibold shrink-0 mt-0.5">
-          FORUM DATA
+      <!-- Baseline Model Banner + Real-Hours Feedback -->
+      <div class="bg-white border border-[#E5E7EB] rounded-xl p-4 flex flex-col gap-3">
+        <div class="flex items-start gap-3">
+          <div class="px-2 py-1 rounded bg-amber-50 border border-amber-200 text-amber-800 font-mono text-[11px] font-semibold shrink-0 mt-0.5">
+            BASELINE MODEL
+          </div>
+          <div class="text-xs sm:text-sm text-gray-700 leading-relaxed" id="baseline-note">
+            Built-in heuristic baseline. Not yet calibrated against real user data — log your actual hours to improve it.
+          </div>
         </div>
-        <div class="text-xs sm:text-sm text-gray-700 leading-relaxed" id="forum-benchmark-note">
-          Based on r/college & r/csMajors student reports, similar deliverables average 10.5 hours baseline, adjusted +35% for your calibrated confidence and setup overhead.
+        <div class="flex flex-wrap items-center gap-2 pt-2 border-t border-gray-100">
+          <label for="actual-hours-input" class="text-xs font-mono text-gray-500">How long did this ACTUALLY take you?</label>
+          <input type="number" id="actual-hours-input" min="0.5" step="0.5" placeholder="e.g. 12" class="w-20 rounded-md border border-gray-300 px-2 py-1 text-xs font-mono focus:outline-none focus:border-indigo-600" />
+          <button type="button" onclick="logActualHours()" class="px-2.5 py-1 rounded-md bg-gray-900 hover:bg-indigo-600 text-white text-xs font-mono transition cursor-pointer">Log it</button>
+          <span id="time-log-count" class="text-[11px] font-mono text-gray-400"></span>
         </div>
       </div>
 
@@ -494,7 +502,7 @@
   <footer class="border-t border-[#E5E7EB] bg-white py-4 mt-12">
     <div class="max-w-5xl mx-auto px-4 sm:px-6 flex flex-col sm:flex-row items-center justify-between gap-2 text-xs font-mono text-gray-400">
       <span>icantstudy.link // built for surviving deadlines</span>
-      <span>estimates calibrated against student forum benchmarks</span>
+      <span>estimates use a built-in baseline — log your real hours to improve it</span>
     </div>
   </footer>
 
@@ -520,7 +528,7 @@
       1: '<strong>Level 1 (Lost):</strong> "First time seeing these concepts / no idea where to start." (+65% time multiplier for reading docs, tutorials, and setup).',
       2: '<strong>Level 2 (Shaky):</strong> "Followed some of it in class, but doing it solo feels intimidating." (+35% buffer for trial-and-error).',
       3: '<strong>Level 3 (Basics):</strong> "Understand the lectures/basics, just need dedicated time to figure out the details." (+15% buffer for troubleshooting).',
-      4: '<strong>Level 4 (Solid):</strong> "Comfortable with the core concepts; mostly execution and refinement." (Standard student forum pacing).',
+      4: '<strong>Level 4 (Solid):</strong> "Comfortable with the core concepts; mostly execution and refinement." (Standard baseline pacing).',
       5: '<strong>Level 5 (Fluent):</strong> "Done very similar projects before; can move fast." (-15% time multiplier, focused on polish).'
     };
 
@@ -925,7 +933,7 @@ Requirements:
       const wordMatch = lower.match(/(\d[\d,]*)\s*(?:-\s*\d[\d,]*)?\s*words?/);
       const targetWords = wordMatch ? parseInt(wordMatch[1].replace(/,/g, ''), 10) : 2000;
 
-      // Base hours from student forum benchmarks
+      // Base hours from built-in archetype defaults (not yet user-validated)
       let baseHours = 9.5;
       let categoryBadge = 'ACADEMIC DELIVERABLE';
       let archetypeLabel = 'university assignment';
@@ -942,6 +950,14 @@ Requirements:
         baseHours = 8.5;
         categoryBadge = 'PROBLEM SET / QUANT';
         archetypeLabel = 'quantitative problem set';
+      }
+
+      // Blend in real logged hours for this category (device-local until a server exists)
+      const catLogs = getTimeLogs().filter(l => l.category === categoryBadge && l.estimated > 0);
+      if (catLogs.length >= 3) {
+        const ratios = catLogs.map(l => l.actual / l.estimated).sort((a, b) => a - b);
+        const median = ratios[Math.floor(ratios.length / 2)];
+        baseHours = Math.round(baseHours * median * 10) / 10;
       }
 
       // Apply student calibration multipliers
@@ -963,7 +979,7 @@ Requirements:
 
       const confPct = Math.round((confMultipliers[state.confidence] - 1) * 100);
       const confNote = confPct >= 0 ? `+${confPct}%` : `${confPct}%`;
-      const forumBenchmarkNote = `Based on r/college & student forum averages for a ${archetypeLabel} (${baseHours}h baseline), adjusted ${confNote} for Level ${state.confidence}/5 confidence and ${state.targetGrade}-grade target.`;
+      const baselineNote = `Heuristic baseline for a ${archetypeLabel}: ~${baseHours}h typical, adjusted ${confNote} for Level ${state.confidence}/5 confidence and ${state.targetGrade}-grade target. Not yet validated against real user-logged hours.`;
 
       // Construct 5 realistic phases tailored to archetype
       let phaseTemplates = [];
@@ -1182,7 +1198,7 @@ Requirements:
       return enrichPlanWithDates({
         assignmentTitle: detectedTitle,
         categoryBadge,
-        forumBenchmarkNote,
+        baselineNote,
         phases
       });
     }
@@ -1255,8 +1271,9 @@ Requirements:
       document.getElementById('metric-stress').textContent = `${peakStress}/10`;
       document.getElementById('metric-stress-label').textContent = peakStress >= 8.5 ? 'Severe' : peakStress >= 7 ? 'High' : 'Moderate';
 
-      // Forum note
-      document.getElementById('forum-benchmark-note').textContent = plan.forumBenchmarkNote;
+      // Baseline note
+      document.getElementById('baseline-note').textContent = plan.baselineNote;
+      renderTimeLogCount();
 
       renderTimelineDiagram();
       renderSubtasksAccordion();
@@ -1654,6 +1671,40 @@ Requirements:
 
     function sleep(ms) {
       return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    // =========================================================================
+    // REAL-HOURS FEEDBACK LOG (localStorage, feeds back into baseline)
+    // =========================================================================
+    function getTimeLogs() {
+      try { return JSON.parse(localStorage.getItem('icantstudy_time_log')) || []; } catch { return []; }
+    }
+
+    function logActualHours() {
+      const input = document.getElementById('actual-hours-input');
+      const actual = parseFloat(input.value);
+      if (!state.plan) { showToast('Generate a plan first.'); return; }
+      if (!actual || actual <= 0) { showToast('Enter how many hours it actually took.'); return; }
+      const logs = getTimeLogs();
+      logs.push({
+        category: state.plan.categoryBadge,
+        estimated: state.plan.totalHours,
+        actual,
+        confidence: state.confidence,
+        targetGrade: state.targetGrade,
+        date: new Date().toISOString(),
+      });
+      try { localStorage.setItem('icantstudy_time_log', JSON.stringify(logs)); } catch { /* quota */ }
+      input.value = '';
+      renderTimeLogCount();
+      showToast(`Logged ${actual}h — baseline sharpens as more hours get logged.`);
+    }
+
+    function renderTimeLogCount() {
+      const n = getTimeLogs().length;
+      document.getElementById('time-log-count').textContent = n
+        ? `${n} real-hour log${n > 1 ? 's' : ''} on this device`
+        : 'no logs on this device yet';
     }
 
     let toastTimer = null;

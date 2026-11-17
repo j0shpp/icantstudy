@@ -862,7 +862,7 @@ Requirements:
     }
 
     // =========================================================================
-    // PROCESSING PIPELINE (GEMINI API + ROCK-SOLID FALLBACK)
+    // PROCESSING PIPELINE (LOCAL HEURISTIC ENGINE)
     // =========================================================================
     async function processAssignment() {
       setStep('loading');
@@ -881,27 +881,14 @@ Requirements:
       bar.style.width = '25%';
 
       await sleep(300);
-      titleEl.textContent = 'Cross-referencing student forum time-estimates...';
+      titleEl.textContent = 'Applying calibration to baseline effort estimates...';
       subEl.textContent = `Applying Level ${state.confidence}/5 confidence & ${state.targetGrade}-grade multipliers`;
       addLog(`[ok] Calibrated multiplier: ${getMultiplierSummary()}`);
       bar.style.width = '60%';
 
-      // Attempt Gemini API structured call first, fallback cleanly if unavailable
-      let generatedPlan = null;
-      try {
-        generatedPlan = await tryGeminiBreakdown();
-        if (generatedPlan) {
-          addLog('[ok] Synthesized custom phase roadmap via Gemini');
-        }
-      } catch (e) {
-        // Silent fallback to local intelligent heuristic parser
-      }
-
-      if (!generatedPlan) {
-        await sleep(350);
-        addLog('[ok] Parsed deliverables & generated student-calibrated schedule');
-        generatedPlan = generateIntelligentFallbackPlan();
-      }
+      await sleep(350);
+      addLog('[ok] Heuristic engine: parsed deliverables & built calibrated schedule (no AI backend)');
+      const generatedPlan = generateHeuristicPlan();
 
       titleEl.textContent = 'Calculating deadline pressure curve...';
       subEl.textContent = 'Mapping cognitive load from Now → Deadline';
@@ -922,99 +909,10 @@ Requirements:
       return `conf ${confMap[state.confidence]}, target ${gradeMap[state.targetGrade]}`;
     }
 
-    async function tryGeminiBreakdown() {
-      const apiKey = ""; // Runtime-provided when available
-      const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${apiKey}`;
-
-      const now = new Date();
-      const hoursAvailable = Math.max(2, Math.round((state.deadline - now) / (1000 * 60 * 60)));
-      const promptText = getCombinedText().slice(0, 6000);
-
-      const systemPrompt = `You are icantstudy.link, a realistic, anti-procrastination academic planner grounded in real university student forum data (r/college, r/csMajors, r/GradSchool).
-Break the student's assignment into 5 realistic, sequential phases from NOW until the DEADLINE.
-Be honest about hours—students underestimate setup, debugging, citations, and formatting.
-Adjust total hours based on:
-- Confidence Level ${state.confidence}/5 (1=lost +65% hours, 3=basics +15%, 5=fluent -15%)
-- Schedule Mode: ${state.pace}
-- Target Grade: ${state.targetGrade} (A requires +25% polish/edge cases, C focuses on core passing criteria)
-Total hours available until deadline: ${hoursAvailable} hours.`;
-
-      const userQuery = `Assignment Title: ${state.title || 'Untitled Assignment'}
-Current Time: ${now.toISOString()}
-Deadline: ${state.deadline.toISOString()}
-Assignment Content:
-${promptText}`;
-
-      const payload = {
-        contents: [{ parts: [{ text: userQuery }] }],
-        systemInstruction: { parts: [{ text: systemPrompt }] },
-        generationConfig: {
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: "OBJECT",
-            properties: {
-              assignmentTitle: { type: "STRING" },
-              categoryBadge: { type: "STRING" },
-              forumBenchmarkNote: { type: "STRING" },
-              phases: {
-                type: "ARRAY",
-                items: {
-                  type: "OBJECT",
-                  properties: {
-                    name: { type: "STRING" },
-                    intensity: { type: "STRING", enum: ["light", "core", "heavy", "crunch"] },
-                    hours: { type: "NUMBER" },
-                    difficultyScore: { type: "NUMBER" },
-                    reasoning: { type: "STRING" },
-                    subtasks: {
-                      type: "ARRAY",
-                      items: {
-                        type: "OBJECT",
-                        properties: {
-                          label: { type: "STRING" },
-                          minutes: { type: "NUMBER" }
-                        },
-                        required: ["label", "minutes"]
-                      }
-                    }
-                  },
-                  required: ["name", "intensity", "hours", "difficultyScore", "reasoning", "subtasks"]
-                }
-              }
-            },
-            required: ["assignmentTitle", "categoryBadge", "forumBenchmarkNote", "phases"]
-          }
-        }
-      };
-
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 9000);
-
-      try {
-        const res = await fetch(apiUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-          signal: controller.signal
-        });
-        clearTimeout(timeoutId);
-        if (!res.ok) return null;
-        const data = await res.json();
-        const rawJson = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-        if (!rawJson) return null;
-        const parsed = JSON.parse(rawJson);
-        if (!parsed.phases || parsed.phases.length < 3) return null;
-        return enrichPlanWithDates(parsed);
-      } catch (err) {
-        clearTimeout(timeoutId);
-        return null;
-      }
-    }
-
     // =========================================================================
-    // INTELLIGENT HEURISTIC FALLBACK GENERATOR
+    // HEURISTIC PLAN GENERATOR
     // =========================================================================
-    function generateIntelligentFallbackPlan() {
+    function generateHeuristicPlan() {
       const text = getCombinedText();
       const lower = text.toLowerCase();
 

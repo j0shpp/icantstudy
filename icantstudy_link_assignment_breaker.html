@@ -393,6 +393,9 @@
         </div>
       </div>
 
+      <!-- Capacity Warning (plan exceeds realistic daily budget for the chosen pace) -->
+      <div id="capacity-warning" class="hidden bg-red-50 border border-red-200 rounded-xl p-4 text-xs sm:text-sm text-red-800 font-mono"></div>
+
       <!-- Baseline Model Banner + Real-Hours Feedback -->
       <div class="bg-white border border-[#E5E7EB] rounded-xl p-4 flex flex-col gap-3">
         <div class="flex items-start gap-3">
@@ -1313,6 +1316,17 @@ Requirements:
       const peakStress = Math.min(9.9, Math.round((heaviestPhase.difficultyScore + cramPenalty) * 10) / 10);
       document.getElementById('metric-stress').textContent = `${peakStress}/10`;
       document.getElementById('metric-stress-label').textContent = peakStress >= 8.5 ? 'Severe' : peakStress >= 7 ? 'High' : 'Moderate';
+
+      // Capacity check: does the plan actually fit the chosen pace's daily budget?
+      const dailyCap = { steady: 3, busy: 2, zero: 2 }[state.pace];
+      const neededPerDay = Math.round((plan.totalHours / totalDays) * 10) / 10;
+      const warn = document.getElementById('capacity-warning');
+      if (neededPerDay > dailyCap) {
+        warn.textContent = `⚠ This plan needs ~${neededPerDay}h/day over the remaining ${Math.ceil(totalDays)} days — more than "${state.pace}" pace realistically allows (~${dailyCap}h/day). Start earlier, drop to a C target, or scope down to core deliverables.`;
+        warn.classList.remove('hidden');
+      } else {
+        warn.classList.add('hidden');
+      }
 
       // Baseline note
       document.getElementById('baseline-note').textContent = plan.baselineNote;

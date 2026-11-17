@@ -565,6 +565,46 @@ Requirements:
     // =========================================================================
     // INITIALIZATION
     // =========================================================================
+    // =========================================================================
+    // PERSISTENCE (localStorage)
+    // =========================================================================
+    const PLAN_KEY = 'icantstudy_plan';
+
+    function savePlan() {
+      try {
+        localStorage.setItem(PLAN_KEY, JSON.stringify({
+          plan: state.plan,
+          completed: [...state.completedTasks],
+          deadline: state.deadline,
+          confidence: state.confidence,
+          pace: state.pace,
+          targetGrade: state.targetGrade,
+          title: state.title,
+        }));
+      } catch { /* storage full — skip persistence */ }
+    }
+
+    function clearSavedPlan() { localStorage.removeItem(PLAN_KEY); }
+
+    function tryRestorePlan() {
+      let snap;
+      try { snap = JSON.parse(localStorage.getItem(PLAN_KEY)); } catch { return; }
+      if (!snap || !snap.plan || !Array.isArray(snap.plan.phases)) return;
+      const deadline = new Date(snap.deadline);
+      if (!(deadline > new Date())) { clearSavedPlan(); return; } // past deadline — drop stale plan
+      state.plan = snap.plan;
+      state.plan.phases.forEach(p => { p.startDate = new Date(p.startDate); p.endDate = new Date(p.endDate); });
+      state.completedTasks = new Set(snap.completed || []);
+      state.deadline = deadline;
+      state.confidence = snap.confidence || 3;
+      state.pace = snap.pace || 'steady';
+      state.targetGrade = snap.targetGrade || 'B';
+      state.title = snap.title || '';
+      renderDashboard();
+      setStep(3);
+      showToast('Restored your last plan.');
+    }
+
     window.addEventListener('DOMContentLoaded', () => {
       if (window.pdfjsLib) {
         pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
@@ -573,6 +613,7 @@ Requirements:
       setupFileHandlers();
       setupInputListeners();
       updateDeadlinePreview();
+      tryRestorePlan();
     });
 
     function initDefaultDeadline() {
@@ -866,6 +907,7 @@ Requirements:
       updateWordCounter();
       initDefaultDeadline();
       updateDeadlinePreview();
+      clearSavedPlan();
       setStep(1);
     }
 
@@ -909,6 +951,7 @@ Requirements:
 
       renderDashboard();
       setStep(3);
+      savePlan();
     }
 
     function getMultiplierSummary() {
@@ -1423,6 +1466,7 @@ Requirements:
       renderTimelineDiagram();
       renderSubtasksAccordion();
       updateCompletionMetrics();
+      savePlan();
     }
 
     function toggleEntirePhase(pIdx, isChecked) {
@@ -1435,6 +1479,7 @@ Requirements:
       renderTimelineDiagram();
       renderSubtasksAccordion();
       updateCompletionMetrics();
+      savePlan();
     }
 
     function updateCompletionMetrics() {

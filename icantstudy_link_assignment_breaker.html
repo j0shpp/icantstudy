@@ -1678,9 +1678,18 @@ Requirements:
 
       tooltip.style.left = `${left}px`;
       tooltip.style.top = `12px`;
+
+      // touch has no mouseleave — auto-dismiss
+      clearTimeout(tooltipTimer);
+      if (evt && evt.type === 'touchstart') {
+        tooltipTimer = setTimeout(hideChartTooltip, 5000);
+      }
     }
 
+    let tooltipTimer = null;
+
     function hideChartTooltip() {
+      clearTimeout(tooltipTimer);
       document.getElementById('chart-tooltip').classList.add('hidden');
     }
 
